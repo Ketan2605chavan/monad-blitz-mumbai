@@ -75,7 +75,7 @@ async function processUser(
     return;
   }
 
-  const allocs = allocations as Array<{ protocolName: string; basisPoints: bigint }>;
+  const allocs = allocations as unknown as Array<{ protocolName: string; basisPoints: bigint }>;
 
   // Calculate current blended APY from existing allocation
   const currentApy = allocs.reduce((sum, a) => {

@@ -2,11 +2,11 @@ import {
   createWalletClient,
   createPublicClient,
   http,
-  privateKeyToAccount,
   encodeFunctionData,
   parseAbi,
   type Address,
 } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { publicClient } from "./rateFetcher";
 import type { ProtocolRate } from "./rateFetcher";
 
