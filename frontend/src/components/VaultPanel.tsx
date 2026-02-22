@@ -123,9 +123,9 @@ export default function VaultPanel() {
     } catch {}
   };
 
-  // mETH = 18 decimals
-  const balance        = portfolio   ? (Number(portfolio.balance) / 1e18).toFixed(4)           : "0.0000";
-  const yieldEarned    = portfolio   ? (Number(portfolio.totalYieldEarned) / 1e18).toFixed(6)  : "0.000000";
+  // mETH = 18 decimals — portfolio is a tuple: [balance, riskProfile, totalDeposited, totalWithdrawn, totalYieldEarned, isActive]
+  const balance        = portfolio   ? (Number((portfolio as readonly [bigint, number, bigint, bigint, bigint, boolean])[0]) / 1e18).toFixed(4)           : "0.0000";
+  const yieldEarned    = portfolio   ? (Number((portfolio as readonly [bigint, number, bigint, bigint, bigint, boolean])[4]) / 1e18).toFixed(6)  : "0.000000";
   const walletBalance  = methBalance ? (Number(methBalance) / 1e18).toFixed(4)                 : "0.0000";
 
   if (!isConnected) {
