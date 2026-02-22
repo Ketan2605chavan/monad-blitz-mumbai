@@ -61,15 +61,22 @@ export function usePortfolio(address?: `0x${string}`) {
     query:   { refetchInterval: 500 }, // Monad produces a block every ~0.4s
   });
 
+  // getPortfolioState returns a tuple: [balance, riskProfile, depositTimestamp, lastRebalanceTimestamp, totalYieldEarned, isActive]
+  const portfolioTuple = portfolio as readonly [bigint, bigint, bigint, bigint, bigint, boolean] | undefined;
+
+  const portfolioObj = portfolioTuple
+    ? {
+        balance:                portfolioTuple[0],
+        riskProfile:            portfolioTuple[1],
+        depositTimestamp:       portfolioTuple[2],
+        lastRebalanceTimestamp: portfolioTuple[3],
+        totalYieldEarned:       portfolioTuple[4],
+        isActive:               portfolioTuple[5],
+      }
+    : undefined;
+
   return {
-    portfolio:  portfolio as {
-      balance:                 bigint;
-      riskProfile:             bigint;
-      depositTimestamp:        bigint;
-      lastRebalanceTimestamp:  bigint;
-      totalYieldEarned:        bigint;
-      isActive:                boolean;
-    } | undefined,
+    portfolio: portfolioObj,
     allocations: allocations as Array<{
       protocol:     string;
       basisPoints:  bigint;

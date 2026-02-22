@@ -106,10 +106,10 @@ export default function PortfolioDashboard() {
     );
   }
 
-  const balance      = portfolio ? Number(portfolio.balance) / 1e18 : 0;
-  const yieldEarned  = portfolio ? Number(portfolio.totalYieldEarned) / 1e18 : 0;
+  const balance      = portfolio?.balance      ? Number(portfolio.balance) / 1e18 : 0;
+  const yieldEarned  = portfolio?.totalYieldEarned ? Number(portfolio.totalYieldEarned) / 1e18 : 0;
   const apy          = allocations?.length ? 18.4 : 0; // from yield sources
-  const riskProfile  = portfolio ? Number(portfolio.riskProfile) : 1;
+  const riskProfile  = portfolio?.riskProfile != null ? Number(portfolio.riskProfile) : 1;
 
   // Build pie data from allocations
   const pieData = allocations?.length
