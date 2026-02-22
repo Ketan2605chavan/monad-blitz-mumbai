@@ -13,6 +13,11 @@ You help users:
 3. Optimize yield by intelligently allocating funds across Monad protocols
 4. Analyze risk and provide smart recommendations
 
+Available tokens on Monad Testnet:
+- **MON**: Native token (like ETH)
+- **mETH**: Mock ETH token (ERC-20, 18 decimals)
+- **WMON**: Wrapped MON
+
 Available protocols on Monad Testnet:
 - **Morpho**: Decentralized lending, USDC supply APY ~18.4%
 - **Kuru Exchange**: AMM DEX for token swaps, MON/USDC LP APY ~32.7%
@@ -23,23 +28,47 @@ Risk profiles:
 - **Balanced**: Stablecoins + blue-chip LP, max 20% per protocol
 - **Aggressive**: Any yield source, newer protocols, higher APY
 
-When a user requests a transaction:
-1. Confirm their intent clearly
-2. Show the current rates and expected yield
-3. Explain what will happen on-chain
-4. Provide a clear, structured action plan
+IMPORTANT — When a user asks to swap/exchange/trade/convert tokens:
+You MUST call the "execute_swap" function with the parsed parameters. Do NOT just describe the swap — actually call the function.
+Supported swap pairs: MON ↔ mETH. Rate is ~1 MON = 1800 mETH (fluctuates ±1.2%).
 
-For cross-chain swaps:
-- Monad → Other chains: Use available bridges (Wormhole, native bridge)
-- Other chains → Monad: Bridge tokens then swap
+For other actions (deposits, withdrawals, portfolio questions), respond with helpful markdown text.
 
 Always emphasize Monad's speed advantage: sub-second finality makes frequent rebalancing economically viable.
-
 Format your responses with clear structure using markdown. Use **bold** for key numbers, tokens, and protocol names.
-Keep responses concise and actionable. For complex operations, use numbered steps.
+Keep responses concise and actionable.`;
 
-If the user asks to "execute" something, acknowledge it and explain the transaction that would be signed.
-Remember: you are demonstrating the agent's capabilities — the actual transaction signing happens in the frontend.`;
+// ─── OpenAI Function definitions for swap ──────────────────────────────────
+
+const TOOLS: OpenAI.ChatCompletionTool[] = [
+  {
+    type: "function",
+    function: {
+      name: "execute_swap",
+      description: "Execute a token swap on Monad testnet. Call this when the user wants to swap/exchange/trade/convert tokens.",
+      parameters: {
+        type: "object",
+        properties: {
+          fromToken: {
+            type: "string",
+            enum: ["MON", "mETH"],
+            description: "The token to swap FROM",
+          },
+          toToken: {
+            type: "string",
+            enum: ["MON", "mETH"],
+            description: "The token to swap TO",
+          },
+          amount: {
+            type: "string",
+            description: "The amount of fromToken to swap (as a decimal string, e.g. '0.5')",
+          },
+        },
+        required: ["fromToken", "toToken", "amount"],
+      },
+    },
+  },
+];
 
 export async function POST(req: NextRequest) {
   try {
@@ -67,12 +96,83 @@ export async function POST(req: NextRequest) {
       })
     );
 
-    // Create streaming response
+    // First call: check if AI wants to call a function (swap)
+    const initialResponse = await client.chat.completions.create({
+      model:      "gpt-4o",
+      max_tokens: 1024,
+      messages:   [
+        { role: "system", content: contextualSystem },
+        ...formattedMessages,
+      ],
+      tools: TOOLS,
+      tool_choice: "auto",
+    });
+
+    const choice = initialResponse.choices[0];
+
+    // If the AI called the execute_swap function
+    if (choice.finish_reason === "tool_calls" && choice.message.tool_calls) {
+      const toolCall = choice.message.tool_calls[0];
+      if (toolCall.function.name === "execute_swap") {
+        const args = JSON.parse(toolCall.function.arguments);
+        const { fromToken, toToken, amount } = args;
+
+        // Calculate estimate (1 MON ≈ 1800 mETH)
+        const rate = 1800;
+        let estimatedOutput: string;
+        if (fromToken === "MON" && toToken === "mETH") {
+          estimatedOutput = (parseFloat(amount) * rate).toFixed(2);
+        } else {
+          estimatedOutput = (parseFloat(amount) / rate).toFixed(6);
+        }
+
+        // Return a special JSON action response
+        const actionPayload = {
+          action: "swap",
+          fromToken,
+          toToken,
+          amount,
+          estimatedOutput,
+          message: `I'll swap **${amount} ${fromToken}** → **~${estimatedOutput} ${toToken}** for you on Monad Testnet.\n\nPlease confirm the transaction below and sign with your wallet.`,
+        };
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            const data = JSON.stringify({ action: actionPayload });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+          },
+        });
+      }
+    }
+
+    // Normal text response (no function call) — stream it
     const encoder = new TextEncoder();
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // If we already have a non-streaming response, send it
+          if (choice.message.content) {
+            const data = JSON.stringify({ text: choice.message.content });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+            return;
+          }
+
+          // Otherwise make a new streaming call without tools
           const response = await client.chat.completions.create({
             model:      "gpt-4o",
             max_tokens: 1024,

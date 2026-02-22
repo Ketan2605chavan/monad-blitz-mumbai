@@ -1,29 +1,47 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useAccount } from "wagmi";
-import { Send, Bot, User, Zap, TrendingUp, RefreshCw, BarChart2 } from "lucide-react";
+import { useAccount, useWriteContract, useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
+import { parseUnits, parseEther } from "viem";
+import { Send, Bot, User, Zap, TrendingUp, RefreshCw, BarChart2, ArrowRightLeft, Loader2, CheckCircle, AlertCircle, ExternalLink } from "lucide-react";
 import { clsx } from "clsx";
+import { CONTRACT_ADDRESSES, MOCK_TOKEN_ABI } from "@/lib/contracts";
+import { monadTestnet } from "@/lib/wagmi-config";
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+interface SwapAction {
+  action:          "swap";
+  fromToken:       string;
+  toToken:         string;
+  amount:          string;
+  estimatedOutput: string;
+  message:         string;
+}
 
 interface Message {
-  id:      string;
-  role:    "user" | "assistant";
-  content: string;
-  ts:      number;
+  id:          string;
+  role:        "user" | "assistant";
+  content:     string;
+  ts:          number;
+  swapAction?: SwapAction;
+  swapStatus?: "pending-confirm" | "signing" | "confirmed" | "failed";
+  swapTxHash?: string;
+  swapError?:  string;
 }
 
 const SUGGESTED = [
-  { icon: TrendingUp, text: "What's the best yield right now?" },
-  { icon: BarChart2,  text: "Show my portfolio allocation"     },
-  { icon: RefreshCw,  text: "Rebalance for maximum APY"        },
-  { icon: Zap,        text: "Put 60% USDC in highest yield"    },
+  { icon: TrendingUp,    text: "What's the best yield right now?" },
+  { icon: ArrowRightLeft, text: "Swap 0.5 MON to mETH"           },
+  { icon: RefreshCw,     text: "Rebalance for maximum APY"       },
+  { icon: Zap,           text: "Swap 1000 mETH to MON"           },
 ];
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MessageBubble({ msg }: { msg: Message }) {
+function MessageBubble({ msg, onConfirmSwap }: { msg: Message; onConfirmSwap: (msgId: string) => void }) {
   const isBot = msg.role === "assistant";
   return (
     <div
@@ -58,6 +76,11 @@ function MessageBubble({ msg }: { msg: Message }) {
         >
           {/* Render markdown-lite: bold, code */}
           <MarkdownText text={msg.content} />
+
+          {/* Swap confirmation card */}
+          {msg.swapAction && (
+            <SwapConfirmCard msg={msg} onConfirm={onConfirmSwap} />
+          )}
         </div>
         <span
           className={clsx(
@@ -141,13 +164,105 @@ function TypingIndicator() {
   );
 }
 
+// ─── Swap Confirmation Card ────────────────────────────────────────────────
+
+function SwapConfirmCard({
+  msg,
+  onConfirm,
+}: {
+  msg: Message;
+  onConfirm: (msgId: string) => void;
+}) {
+  const swap = msg.swapAction!;
+  const status = msg.swapStatus;
+
+  return (
+    <div className="mt-3 bg-[#0a0a0a] border border-[#1f1f1f] rounded-2xl p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <ArrowRightLeft size={14} className="text-white" />
+        <span className="text-xs font-mono text-[#888]">SWAP CONFIRMATION</span>
+      </div>
+
+      {/* Swap details */}
+      <div className="flex items-center justify-between bg-[#111] rounded-xl px-4 py-3">
+        <div className="text-center">
+          <p className="text-lg font-semibold font-mono">{swap.amount}</p>
+          <p className="text-xs text-[#888]">{swap.fromToken}</p>
+        </div>
+        <ArrowRightLeft size={16} className="text-[#555]" />
+        <div className="text-center">
+          <p className="text-lg font-semibold font-mono text-green-400">{swap.estimatedOutput}</p>
+          <p className="text-xs text-[#888]">{swap.toToken}</p>
+        </div>
+      </div>
+
+      {/* Rate info */}
+      <div className="flex items-center justify-between text-xs text-[#555]">
+        <span>Rate</span>
+        <span className="font-mono text-[#888]">1 MON ≈ 1800 mETH</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-[#555]">
+        <span>Network</span>
+        <span className="font-mono text-[#888]">Monad Testnet</span>
+      </div>
+      <div className="flex items-center justify-between text-xs text-[#555]">
+        <span>Gas</span>
+        <span className="font-mono text-[#888]">~0.001 MON</span>
+      </div>
+
+      {/* Status / Action */}
+      {status === "confirmed" && msg.swapTxHash && (
+        <div className="flex items-center gap-2 text-green-400 text-sm bg-green-400/10 rounded-xl px-3 py-2">
+          <CheckCircle size={14} />
+          <span className="flex-1">Swap successful!</span>
+          <a
+            href={`https://testnet.monadexplorer.com/tx/${msg.swapTxHash}`}
+            target="_blank" rel="noopener noreferrer"
+            className="text-xs font-mono text-[#666] hover:text-white flex items-center gap-1"
+          >
+            {msg.swapTxHash.slice(0, 10)}… <ExternalLink size={10} />
+          </a>
+        </div>
+      )}
+
+      {status === "failed" && (
+        <div className="flex items-center gap-2 text-red-400 text-sm bg-red-400/10 rounded-xl px-3 py-2">
+          <AlertCircle size={14} />
+          <span className="text-xs">{msg.swapError || "Transaction failed"}</span>
+        </div>
+      )}
+
+      {status === "signing" && (
+        <div className="flex items-center justify-center gap-2 text-yellow-400 text-sm py-2">
+          <Loader2 size={14} className="animate-spin" />
+          <span>Waiting for wallet signature…</span>
+        </div>
+      )}
+
+      {status === "pending-confirm" && (
+        <button
+          onClick={() => onConfirm(msg.id)}
+          className="w-full py-3 bg-white text-black font-semibold text-sm rounded-xl
+                     hover:bg-gray-100 active:bg-gray-200 transition-all flex items-center justify-center gap-2"
+        >
+          <ArrowRightLeft size={14} />
+          Confirm & Sign Swap
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function ChatBox() {
   const { address } = useAccount();
+  const { writeContractAsync } = useWriteContract();
+
   const [messages, setMessages]   = useState<Message[]>([
     {
       id:      "welcome",
       role:    "assistant",
-      content: "Hey! I'm **DeFi Copilot** — your AI yield optimizer on Monad.\n\nI can help you:\n- Find the best yield opportunities\n- Rebalance your portfolio across protocols\n- Execute DeFi actions in plain English\n- Analyze your risk and performance\n\nWhat would you like to do today?",
+      content: "Hey! I'm **DeFi Copilot** — your AI yield optimizer on Monad.\n\nI can help you:\n- Find the best yield opportunities\n- Rebalance your portfolio across protocols\n- **Swap tokens** using plain English\n- Analyze your risk and performance\n\nTry saying: *\"Swap 0.5 MON to mETH\"*",
       ts:      Date.now(),
     },
   ]);
@@ -160,6 +275,68 @@ export default function ChatBox() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
+  // ── Execute swap via wallet ──────────────────────────────────────────────
+  const executeSwapFromChat = useCallback(
+    async (msgId: string) => {
+      const msg = messages.find((m) => m.id === msgId);
+      if (!msg?.swapAction || !address) return;
+
+      const swap = msg.swapAction;
+
+      // Mark as signing
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, swapStatus: "signing" as const } : m))
+      );
+
+      try {
+        let txHash: `0x${string}`;
+
+        if (swap.fromToken === "MON" && swap.toToken === "mETH") {
+          // MON → mETH: mint mETH (simulated swap)
+          const outAmount = parseUnits(swap.estimatedOutput, 18);
+          txHash = await writeContractAsync({
+            address: CONTRACT_ADDRESSES.meth as `0x${string}`,
+            abi: MOCK_TOKEN_ABI,
+            functionName: "mint",
+            args: [address, outAmount],
+            chainId: monadTestnet.id,
+          });
+        } else {
+          // mETH → MON: burn mETH (transfer to dead address)
+          const burnAmount = parseUnits(swap.amount, 18);
+          txHash = await writeContractAsync({
+            address: CONTRACT_ADDRESSES.meth as `0x${string}`,
+            abi: MOCK_TOKEN_ABI,
+            functionName: "transfer",
+            args: ["0x000000000000000000000000000000000000dEaD" as `0x${string}`, burnAmount],
+            chainId: monadTestnet.id,
+          });
+        }
+
+        // Success
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? { ...m, swapStatus: "confirmed" as const, swapTxHash: txHash }
+              : m
+          )
+        );
+      } catch (err: any) {
+        const errMsg =
+          err?.shortMessage || err?.message || "Transaction rejected";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msgId
+              ? { ...m, swapStatus: "failed" as const, swapError: errMsg }
+              : m
+          )
+        );
+      }
+    },
+    [messages, address, writeContractAsync]
+  );
+
+  // ── Send message & handle SSE response ───────────────────────────────────
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim() || isLoading) return;
@@ -215,12 +392,31 @@ export default function ChatBox() {
             const data = line.slice(6);
             if (data === "[DONE]") break;
             try {
-              const { text } = JSON.parse(data);
-              if (text) {
+              const parsed = JSON.parse(data);
+
+              // ── Swap action payload ──
+              if (parsed.action) {
+                const swapAction = parsed.action as SwapAction;
                 setMessages((prev) =>
                   prev.map((m) =>
                     m.id === assistantId
-                      ? { ...m, content: m.content + text }
+                      ? {
+                          ...m,
+                          content:    swapAction.message,
+                          swapAction,
+                          swapStatus: "pending-confirm" as const,
+                        }
+                      : m
+                  )
+                );
+              }
+
+              // ── Normal text chunk ──
+              if (parsed.text) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? { ...m, content: m.content + parsed.text }
                       : m
                   )
                 );
@@ -269,7 +465,7 @@ export default function ChatBox() {
       {/* ── Messages ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
+          <MessageBubble key={msg.id} msg={msg} onConfirmSwap={executeSwapFromChat} />
         ))}
         {isLoading && messages[messages.length - 1]?.content === "" && (
           <TypingIndicator />
