@@ -6,6 +6,7 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
   useReadContracts,
+  usePublicClient,
 } from "wagmi";
 import { parseUnits } from "viem";
 import { CONTRACT_ADDRESSES, VAULT_ABI, ERC20_ABI, MOCK_TOKEN_ABI } from "@/lib/contracts";
@@ -13,6 +14,7 @@ import { monadTestnet } from "@/lib/wagmi-config";
 
 export function useVault(address?: `0x${string}`) {
   const [isPending, setIsPending] = useState(false);
+  const publicClient = usePublicClient({ chainId: monadTestnet.id });
 
   // ── Read portfolio state ────────────────────────────────────────────────
 
@@ -89,15 +91,19 @@ export function useVault(address?: `0x${string}`) {
 
     // Approve mETH if needed
     if (!methAllowance || methAllowance < amount) {
-      await approveAsync({
+      const approveHash = await approveAsync({
         address:      CONTRACT_ADDRESSES.meth,
         abi:          ERC20_ABI,
         functionName: "approve",
         args:         [CONTRACT_ADDRESSES.vault, amount],
         chainId:      monadTestnet.id,
       });
-      // Wait for approval to confirm before depositing
-      await new Promise((r) => setTimeout(r, 3000));
+      // Wait for approval to be confirmed on-chain before depositing
+      if (publicClient) {
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      } else {
+        await new Promise((r) => setTimeout(r, 4000));
+      }
     }
 
     const hash = await depositAsync({

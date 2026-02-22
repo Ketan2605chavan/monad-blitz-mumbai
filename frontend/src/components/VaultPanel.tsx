@@ -249,7 +249,7 @@ export default function VaultPanel() {
                   className="input flex-1"
                 />
                 <button
-                  onClick={() => setDepositAmount("1")}
+                  onClick={() => setDepositAmount(walletBalance)}
                   className="btn-secondary text-xs px-3"
                 >
                   MAX

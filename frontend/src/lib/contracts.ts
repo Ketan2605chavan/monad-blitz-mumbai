@@ -162,6 +162,16 @@ export const ERC20_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [
+      { name: "to",     type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    name: "transfer",
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
 ] as const;
 
 // ─── DecisionLog ABI ───────────────────────────────────────────────────────

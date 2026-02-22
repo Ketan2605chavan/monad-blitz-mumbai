@@ -1,0 +1,39 @@
+# ============================================================
+# Cloudflare Tunnel Config — apex-server
+# ============================================================
+#
+# This gets MERGED into ~/.cloudflared/config.yml on the Mint laptop.
+# Tunnel: apex-server (f399a271-e7d8-4e0f-8b91-993d924fb2d7)
+#
+# After copying, restart cloudflared:
+#   sudo systemctl restart cloudflared
+#   — or —
+#   cloudflared tunnel --config ~/.cloudflared/config.yml run apex-server
+#
+# ============================================================
+
+# ── ADD these lines to your EXISTING ~/.cloudflared/config.yml ──
+# Under the ingress: section, BEFORE the catch-all rule, add:
+#
+#   - hostname: monad.tabcrypt.in
+#     service: http://localhost:3000
+#
+# Full example of what the config should look like:
+# ─────────────────────────────────────────────────────────────
+
+tunnel: f399a271-e7d8-4e0f-8b91-993d924fb2d7
+credentials-file: /home/almeh/.cloudflared/f399a271-e7d8-4e0f-8b91-993d924fb2d7.json
+
+ingress:
+  # === YOUR EXISTING ROUTES (keep them!) ===
+  # - hostname: apex.tabcrypt.in
+  #   service: http://localhost:XXXX
+  # - hostname: klipper.tabcrypt.in  (or whatever you have)
+  #   service: http://localhost:XXXX
+
+  # === NEW: DeFi Copilot ===
+  - hostname: monad.tabcrypt.in
+    service: http://localhost:3000
+
+  # Catch-all (must be LAST)
+  - service: http_status:404
