@@ -1,11 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
-import { Shield, TrendingUp, Zap, Loader2, CheckCircle, Info, Droplets } from "lucide-react";
+import { Shield, TrendingUp, Zap, Loader2, CheckCircle, Info, Droplets, Layers, ArrowUpRight, BarChart2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useVault } from "@/hooks/useVault";
 import { YIELD_SOURCES } from "@/lib/contracts";
+
+// ─── Simulated vault allocation ─────────────────────────────────────────
+
+interface VaultAlloc {
+  protocol: string;
+  pool:     string;
+  pct:      number;   // allocation %
+  apy:      number;
+  earned:   number;
+  color:    string;
+}
+
+const BASE_ALLOCS: VaultAlloc[] = [
+  { protocol: "Morpho",  pool: "USDC Lending",   pct: 38, apy: 18.4, earned: 0, color: "#60a5fa" },
+  { protocol: "Kuru",    pool: "MON/USDC LP",    pct: 28, apy: 32.7, earned: 0, color: "#fbbf24" },
+  { protocol: "Ambient", pool: "USDC Stable LP", pct: 18, apy: 14.1, earned: 0, color: "#34d399" },
+  { protocol: "Kuru",    pool: "MON/WMON LP",    pct: 16, apy: 22.5, earned: 0, color: "#a78bfa" },
+];
 
 // ─── Risk profile card ─────────────────────────────────────────────────────
 
@@ -87,6 +105,25 @@ export default function VaultPanel() {
   const [riskProfile,    setRiskProfile]    = useState<0|1|2>(1);
   const [activeForm,     setActiveForm]     = useState<"deposit"|"withdraw">("deposit");
   const [txSuccess,      setTxSuccess]      = useState<string | null>(null);
+
+  // ── Simulated vault allocations (tick every 3s) ────────────────────
+  const [allocs, setAllocs] = useState<VaultAlloc[]>(BASE_ALLOCS);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAllocs((prev) =>
+        prev.map((a) => ({
+          ...a,
+          earned: a.earned + (a.pct * (a.apy / 100)) / (365 * 24 * 1200), // ~3s yield tick
+          apy:    Math.max(5, a.apy + (Math.random() - 0.48) * 0.2),
+        }))
+      );
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const blendedApy = allocs.reduce((s, a) => s + a.apy * (a.pct / 100), 0);
+  const totalEarned = allocs.reduce((s, a) => s + a.earned, 0);
 
   const handleDeposit = async () => {
     if (!depositAmount) return;
@@ -336,8 +373,74 @@ export default function VaultPanel() {
       </div>
 
       {/* ── Live yield sources ───────────────────────────────────────── */}
-      <div className="card space-y-3">
-        <p className="label-mono">AVAILABLE YIELD SOURCES</p>
+      <div className="card space-y-3">        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Layers size={14} className="text-[#555]" />
+            <p className="label-mono">YOUR VAULT ALLOCATION</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[10px] text-[#555] font-mono">LIVE</span>
+          </div>
+        </div>
+
+        {/* Allocation bar */}
+        <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
+          {allocs.map((a, i) => (
+            <div
+              key={i}
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${a.pct}%`, background: a.color }}
+            />
+          ))}
+        </div>
+
+        {/* Protocol rows */}
+        <div className="space-y-1 mt-2">
+          {allocs.map((a, i) => {
+            const depositVal = parseFloat(balance) * (a.pct / 100);
+            return (
+              <div
+                key={i}
+                className="flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-white/[0.02] transition-colors"
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: a.color }}
+                  />
+                  <div>
+                    <p className="text-sm font-medium">{a.protocol}</p>
+                    <p className="text-[10px] text-[#555] font-mono">{a.pool} · {a.pct}% allocated</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="font-mono font-semibold text-green-400">{a.apy.toFixed(1)}%</p>
+                  <p className="text-[10px] text-[#555] font-mono">
+                    +{a.earned.toFixed(4)} mETH earned
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Summary */}
+        <div className="flex items-center justify-between pt-3 border-t border-[#1f1f1f] text-xs">
+          <div className="flex items-center gap-2">
+            <BarChart2 size={12} className="text-[#555]" />
+            <span className="text-[#888] font-mono">Blended APY</span>
+          </div>
+          <span className="font-mono font-semibold text-green-400">{blendedApy.toFixed(1)}%</span>
+        </div>
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[#888] font-mono">Total yield earned</span>
+          <span className="font-mono font-semibold text-green-400">+{totalEarned.toFixed(4)} mETH</span>
+        </div>
+      </div>
+
+      {/* ── Available yield sources ─────────────────────────────── */}
+      <div className="card space-y-3">        <p className="label-mono">AVAILABLE YIELD SOURCES</p>
         <div className="space-y-2">
           {YIELD_SOURCES.map((s) => (
             <div

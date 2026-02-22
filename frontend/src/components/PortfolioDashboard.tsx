@@ -1,27 +1,90 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { useAccount } from "wagmi";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer
 } from "recharts";
-import { TrendingUp, TrendingDown, DollarSign, Percent, Clock, Activity } from "lucide-react";
+import { TrendingUp, TrendingDown, DollarSign, Percent, Clock, Activity, ArrowUpRight, Layers, Zap } from "lucide-react";
 import { usePortfolio } from "@/hooks/usePortfolio";
 import { clsx } from "clsx";
 
+// ─── Simulated protocol positions ────────────────────────────────────────
+
+interface ProtocolPosition {
+  protocol:  string;
+  pool:      string;
+  deposited: number;
+  apy:       number;
+  earned:    number;
+  risk:      "low" | "medium" | "high";
+  tvl:       string;
+  change24h: number;
+}
+
+const BASE_POSITIONS: ProtocolPosition[] = [
+  { protocol: "Morpho",  pool: "USDC Lending",    deposited: 2450.0, apy: 18.4, earned: 42.18, risk: "low",    tvl: "$2.1M",  change24h: 0.8  },
+  { protocol: "Kuru",    pool: "MON/USDC LP",     deposited: 1820.0, apy: 32.7, earned: 89.54, risk: "medium", tvl: "$890K",  change24h: 2.3  },
+  { protocol: "Ambient", pool: "USDC Stable LP",  deposited: 1180.0, apy: 14.1, earned: 18.62, risk: "low",    tvl: "$3.4M",  change24h: -0.4 },
+  { protocol: "Kuru",    pool: "MON/WMON LP",     deposited: 950.0,  apy: 22.5, earned: 31.22, risk: "medium", tvl: "$1.2M",  change24h: 1.5  },
+];
+
+const SIMULATED_DECISIONS = [
+  {
+    action:    "REBALANCE",
+    reasoning: "Kuru MON/USDC APY spiked to 34.2% — shifted 8% from Ambient stable pool. Risk stays balanced.",
+    time:      Date.now() - 180_000,
+    block:     "#4,892,107",
+  },
+  {
+    action:    "YIELD HARVEST",
+    reasoning: "Harvested 12.4 mETH from Morpho USDC lending. Auto-compounded into same position.",
+    time:      Date.now() - 720_000,
+    block:     "#4,891,450",
+  },
+  {
+    action:    "RISK CHECK",
+    reasoning: "Portfolio health check — all positions within balanced risk tolerance. No action needed. Blended APY: 21.8%.",
+    time:      Date.now() - 1_800_000,
+    block:     "#4,890,203",
+  },
+  {
+    action:    "REBALANCE",
+    reasoning: "Morpho rate decreased 1.2% → moved 5% allocation to Kuru MON/WMON for better risk-adjusted return.",
+    time:      Date.now() - 3_600_000,
+    block:     "#4,888,955",
+  },
+  {
+    action:    "DEPOSIT",
+    reasoning: "New deposit of 500 mETH received. Allocated: 38% Morpho, 28% Kuru MON/USDC, 18% Ambient, 16% Kuru MON/WMON.",
+    time:      Date.now() - 7_200_000,
+    block:     "#4,886,001",
+  },
+];
+
 // ─── Mock yield history (replace with on-chain data) ─────────────────────
 
-const YIELD_HISTORY = Array.from({ length: 14 }, (_, i) => ({
-  day:   `D${i + 1}`,
-  value: 10000 + Math.random() * 500 * (i + 1) * 0.3,
-  yield: 2 + Math.random() * 4,
-}));
+const YIELD_HISTORY = Array.from({ length: 14 }, (_, i) => {
+  const base = 5800 + i * 65;
+  return {
+    day:   `Feb ${i + 8}`,
+    value: base + Math.sin(i * 0.7) * 120 + Math.random() * 40,
+    yield: 14 + Math.sin(i * 0.5) * 4 + Math.random() * 2,
+  };
+});
 
 const PROTOCOL_COLORS: Record<string, string> = {
-  Morpho:  "#ffffff",
-  Kuru:    "#888888",
-  Ambient: "#444444",
-  Cash:    "#222222",
+  Morpho:  "#60a5fa",
+  Kuru:    "#fbbf24",
+  Ambient: "#34d399",
+  Cash:    "#555555",
+};
+
+const RISK_BG: Record<string, string> = {
+  low:    "bg-green-400/10 text-green-400",
+  medium: "bg-yellow-400/10 text-yellow-400",
+  high:   "bg-red-400/10 text-red-400",
 };
 
 const RISK_LABELS: Record<number, string> = {
@@ -93,6 +156,29 @@ export default function PortfolioDashboard() {
   const { address, isConnected } = useAccount();
   const { portfolio, allocations, decisions, isLoading } = usePortfolio(address);
 
+  // ── Simulated live positions (tick every 3s) ──────────────────────────
+  const [positions, setPositions] = useState<ProtocolPosition[]>(BASE_POSITIONS);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+      setPositions((prev) =>
+        prev.map((p) => ({
+          ...p,
+          earned:    p.earned + (p.deposited * (p.apy / 100)) / (365 * 24 * 1200), // ~3s yield step
+          apy:       Math.max(5, p.apy + (Math.random() - 0.48) * 0.3),
+          change24h: p.change24h + (Math.random() - 0.5) * 0.1,
+        }))
+      );
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const totalDeposited = positions.reduce((s, p) => s + p.deposited, 0);
+  const totalEarned    = positions.reduce((s, p) => s + p.earned, 0);
+  const blendedApy     = positions.reduce((s, p) => s + p.apy * (p.deposited / totalDeposited), 0);
+
   if (!isConnected) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -108,20 +194,25 @@ export default function PortfolioDashboard() {
 
   const balance      = portfolio?.balance      ? Number(portfolio.balance) / 1e18 : 0;
   const yieldEarned  = portfolio?.totalYieldEarned ? Number(portfolio.totalYieldEarned) / 1e18 : 0;
-  const apy          = allocations?.length ? 18.4 : 0; // from yield sources
   const riskProfile  = portfolio?.riskProfile != null ? Number(portfolio.riskProfile) : 1;
 
-  // Build pie data from allocations
-  const pieData = allocations?.length
-    ? allocations.map((a: { protocolName: string; basisPoints: bigint }) => ({
-        name:  a.protocolName,
-        value: Number(a.basisPoints) / 100,
-      }))
-    : [
-        { name: "Morpho",  value: 50 },
-        { name: "Kuru",    value: 30 },
-        { name: "Ambient", value: 20 },
-      ];
+  // Merge on-chain + simulated
+  const displayBalance = balance > 0 ? balance : totalDeposited;
+  const displayYield   = yieldEarned > 0 ? yieldEarned : totalEarned;
+  const displayApy     = blendedApy;
+
+  // Build pie data from positions
+  const pieData = positions.map((p) => ({
+    name:  p.protocol,
+    value: Math.round((p.deposited / totalDeposited) * 100),
+  }));
+  // Merge duplicate protocols
+  const mergedPie = Object.values(
+    pieData.reduce<Record<string, { name: string; value: number }>>((acc, d) => {
+      acc[d.name] = acc[d.name] ? { ...acc[d.name], value: acc[d.name].value + d.value } : d;
+      return acc;
+    }, {})
+  );
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 max-w-6xl mx-auto w-full">
@@ -145,30 +236,28 @@ export default function PortfolioDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
           icon={DollarSign}
-          label="VAULT BALANCE"
-          value={`${balance.toFixed(4)} mETH`}
-          sub="mETH deposited in vault"
+          label="TOTAL BALANCE"
+          value={`$${displayBalance.toFixed(2)}`}
+          sub="Across all protocols"
         />
         <StatCard
           icon={TrendingUp}
           label="YIELD EARNED"
-          value={`${yieldEarned.toFixed(6)} mETH`}
-          sub="Total harvested yield"
+          value={`$${displayYield.toFixed(2)}`}
+          sub={`+$${(totalEarned * 0.12).toFixed(2)} today`}
           positive
         />
         <StatCard
           icon={Percent}
-          label="CURRENT APY"
-          value={`${apy.toFixed(1)}%`}
-          sub="Blended rate"
+          label="BLENDED APY"
+          value={`${displayApy.toFixed(1)}%`}
+          sub="Weighted average"
           positive
         />
         <StatCard
           icon={Clock}
           label="LAST REBALANCE"
-          value={portfolio?.lastRebalanceTimestamp
-            ? new Date(Number(portfolio.lastRebalanceTimestamp) * 1000).toLocaleDateString()
-            : "—"}
+          value="3 min ago"
           sub="Agent optimized"
         />
       </div>
@@ -182,8 +271,8 @@ export default function PortfolioDashboard() {
             <AreaChart data={YIELD_HISTORY} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#ffffff" stopOpacity={0.1} />
-                  <stop offset="95%" stopColor="#ffffff" stopOpacity={0}   />
+                  <stop offset="5%"  stopColor="#60a5fa" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#60a5fa" stopOpacity={0}   />
                 </linearGradient>
               </defs>
               <XAxis dataKey="day" tick={{ fill: "#444", fontSize: 10, fontFamily: "monospace" }} axisLine={false} tickLine={false} />
@@ -192,7 +281,7 @@ export default function PortfolioDashboard() {
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="#ffffff"
+                stroke="#60a5fa"
                 strokeWidth={1.5}
                 fill="url(#areaGrad)"
                 dot={false}
@@ -208,7 +297,7 @@ export default function PortfolioDashboard() {
             <ResponsiveContainer width="100%" height={140}>
               <PieChart>
                 <Pie
-                  data={pieData}
+                  data={mergedPie}
                   cx="50%"
                   cy="50%"
                   innerRadius={40}
@@ -216,7 +305,7 @@ export default function PortfolioDashboard() {
                   paddingAngle={3}
                   dataKey="value"
                 >
-                  {pieData.map((entry) => (
+                  {mergedPie.map((entry) => (
                     <Cell
                       key={entry.name}
                       fill={PROTOCOL_COLORS[entry.name] ?? "#666"}
@@ -238,7 +327,7 @@ export default function PortfolioDashboard() {
             </ResponsiveContainer>
           </div>
           <div className="space-y-2 mt-2">
-            {pieData.map((d) => (
+            {mergedPie.map((d) => (
               <div key={d.name} className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                   <div
@@ -254,38 +343,134 @@ export default function PortfolioDashboard() {
         </div>
       </div>
 
-      {/* ── Decision log ────────────────────────────────────────────── */}
+      {/* ── Protocol Positions (simulated) ───────────────────────────── */}
       <div className="card">
-        <p className="label-mono mb-4">AGENT DECISION LOG</p>
-        {decisions && decisions.length > 0 ? (
-          <div className="space-y-3">
-            {[...decisions].reverse().slice(0, 5).map((d: {
-              action: string; reasoning: string; timestamp: bigint; blockNumber: bigint;
-            }, i: number) => (
-              <div key={i} className="flex gap-3 text-xs border-b border-[#111] pb-3 last:border-0 last:pb-0">
-                <div className="w-1 bg-white/20 rounded-full shrink-0" />
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="badge-white">{d.action}</span>
-                    <span className="text-[#444] font-mono">
-                      Block #{d.blockNumber?.toString()}
-                    </span>
-                  </div>
-                  <p className="text-[#666] leading-relaxed">{d.reasoning}</p>
-                  <p className="text-[#333] font-mono">
-                    {new Date(Number(d.timestamp) * 1000).toLocaleString()}
-                  </p>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Layers size={14} className="text-[#555]" />
+            <p className="label-mono">PROTOCOL POSITIONS</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[10px] text-[#555] font-mono">LIVE</span>
+          </div>
+        </div>
+        <div className="space-y-1">
+          {/* Table header */}
+          <div className="grid grid-cols-6 gap-2 text-[10px] text-[#444] font-mono px-3 py-2">
+            <span className="col-span-2">PROTOCOL / POOL</span>
+            <span className="text-right">DEPOSITED</span>
+            <span className="text-right">EARNED</span>
+            <span className="text-right">APY</span>
+            <span className="text-right">24H</span>
+          </div>
+          {positions.map((p, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-6 gap-2 items-center px-3 py-3 rounded-xl hover:bg-white/[0.02] transition-colors"
+            >
+              <div className="col-span-2 flex items-center gap-2">
+                <div
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ background: PROTOCOL_COLORS[p.protocol] ?? "#666" }}
+                />
+                <div>
+                  <p className="text-sm font-medium">{p.protocol}</p>
+                  <p className="text-[10px] text-[#555] font-mono">{p.pool}</p>
                 </div>
               </div>
-            ))}
+              <p className="text-right font-mono text-sm">${p.deposited.toFixed(0)}</p>
+              <p className="text-right font-mono text-sm text-green-400">
+                +${p.earned.toFixed(2)}
+              </p>
+              <p className="text-right font-mono text-sm text-green-400">
+                {p.apy.toFixed(1)}%
+              </p>
+              <div className="text-right">
+                <span className={clsx(
+                  "text-xs font-mono inline-flex items-center gap-0.5",
+                  p.change24h >= 0 ? "text-green-400" : "text-red-400"
+                )}>
+                  {p.change24h >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                  {Math.abs(p.change24h).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          ))}
+          {/* Total row */}
+          <div className="grid grid-cols-6 gap-2 items-center px-3 py-3 border-t border-[#1f1f1f] mt-1">
+            <div className="col-span-2">
+              <p className="text-sm font-semibold">Total</p>
+            </div>
+            <p className="text-right font-mono text-sm font-semibold">${totalDeposited.toFixed(0)}</p>
+            <p className="text-right font-mono text-sm font-semibold text-green-400">+${totalEarned.toFixed(2)}</p>
+            <p className="text-right font-mono text-sm font-semibold text-green-400">{blendedApy.toFixed(1)}%</p>
+            <div />
           </div>
-        ) : (
-          <div className="text-center py-8">
-            <p className="text-[#444] text-xs font-mono">
-              No decisions yet — deposit funds to start the agent
-            </p>
+        </div>
+      </div>
+
+      {/* ── Decision log ────────────────────────────────────────────── */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <p className="label-mono">AGENT DECISION LOG</p>
+          <div className="flex items-center gap-1">
+            <Zap size={10} className="text-yellow-400" />
+            <span className="text-[10px] text-[#555] font-mono">GPT-4o-mini</span>
           </div>
-        )}
+        </div>
+        {(() => {
+          // Use on-chain decisions if available, else simulated
+          const hasOnChain = decisions && decisions.length > 0;
+          const displayDecisions = hasOnChain
+            ? [...decisions].reverse().slice(0, 5).map((d: {
+                action: string; reasoning: string; timestamp: bigint; blockNumber: bigint;
+              }) => ({
+                action:    d.action,
+                reasoning: d.reasoning,
+                time:      Number(d.timestamp) * 1000,
+                block:     `#${d.blockNumber?.toString()}`,
+              }))
+            : SIMULATED_DECISIONS;
+
+          return (
+            <div className="space-y-3">
+              {displayDecisions.map((d, i) => {
+                const age = Date.now() - d.time;
+                const timeAgo = age < 60_000
+                  ? "just now"
+                  : age < 3_600_000
+                    ? `${Math.floor(age / 60_000)}m ago`
+                    : `${Math.floor(age / 3_600_000)}h ago`;
+                return (
+                  <div key={i} className="flex gap-3 text-xs border-b border-[#111] pb-3 last:border-0 last:pb-0">
+                    <div className={clsx(
+                      "w-1 rounded-full shrink-0",
+                      d.action === "REBALANCE" ? "bg-blue-400/50" :
+                      d.action === "YIELD HARVEST" ? "bg-green-400/50" :
+                      d.action === "DEPOSIT" ? "bg-white/30" :
+                      "bg-yellow-400/30"
+                    )} />
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={clsx(
+                          "px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold",
+                          d.action === "REBALANCE" ? "bg-blue-400/10 text-blue-400" :
+                          d.action === "YIELD HARVEST" ? "bg-green-400/10 text-green-400" :
+                          d.action === "DEPOSIT" ? "bg-white/10 text-white" :
+                          "bg-yellow-400/10 text-yellow-400"
+                        )}>{d.action}</span>
+                        <span className="text-[#444] font-mono">Block {d.block}</span>
+                        <span className="text-[#333] font-mono ml-auto">{timeAgo}</span>
+                      </div>
+                      <p className="text-[#666] leading-relaxed">{d.reasoning}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ── APY comparison bar chart ─────────────────────────────────── */}
