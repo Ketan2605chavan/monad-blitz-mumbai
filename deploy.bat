@@ -66,7 +66,7 @@ echo ========================================
 echo   DEPLOYMENT COMPLETE!
 echo ========================================
 echo.
-echo   Frontend:  http://localhost:3000
+echo   Frontend:  http://localhost:3005
 echo   Live URL:  https://monad.tabcrypt.in
 echo   Agent:     Running via PM2
 echo   Tunnel:    Running in separate window

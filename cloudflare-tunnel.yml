@@ -33,7 +33,7 @@ ingress:
 
   # === NEW: DeFi Copilot ===
   - hostname: monad.tabcrypt.in
-    service: http://localhost:3000
+    service: http://localhost:3005
 
   # Catch-all (must be LAST)
   - service: http_status:404
